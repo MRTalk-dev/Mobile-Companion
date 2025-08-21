@@ -6,7 +6,7 @@ import { VRM } from "@pixiv/three-vrm";
 import { loadVRM } from "../lib/vrm/loadVRM";
 import { loadMixamoAnimation } from "../lib/fbx/loadMixamoAnimation";
 
-const companionId = "bebf00bb-8a43-488d-9c23-93c40b84d30e";
+const companionId = "companion_bebf00bb-8a43-488d-9c23-93c40b84d30e";
 const companionUrl = "http://localhost:4000";
 const firehoseUrl = "ws://localhost:8080";
 
@@ -120,7 +120,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "image", context: base64 }),
       });
-    }, 20000);
+    }, 60000);
 
     // --- Three.js ---
     const scene = new THREE.Scene();
