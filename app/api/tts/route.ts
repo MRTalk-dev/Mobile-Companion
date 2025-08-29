@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model_uuid: "a59cb814-0083-4369-8542-f51a29e72af7",
+          model_uuid: process.env.AIVIS_VOICE_ID,
           text,
           use_ssml: true,
           output_format: "mp3",

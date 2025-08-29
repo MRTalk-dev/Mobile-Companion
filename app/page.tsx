@@ -6,17 +6,41 @@ import { VRM } from "@pixiv/three-vrm";
 import { loadVRM } from "../lib/vrm/loadVRM";
 import { loadMixamoAnimation } from "../lib/fbx/loadMixamoAnimation";
 
-const companionId = "companion_bebf00bb-8a43-488d-9c23-93c40b84d30e";
-const companionUrl = "http://localhost:4000";
-const firehoseUrl = "ws://localhost:8080";
+let companionId: string;
+if (!process.env.NEXT_PUBLIC_COMPANION_ID) {
+  throw new Error("NEXT_PUBLIC_COMPANION_ID is required");
+} else {
+  companionId = process.env.NEXT_PUBLIC_COMPANION_ID;
+}
+
+let companionUrl: URL;
+if (!process.env.NEXT_PUBLIC_COMPANION_URL) {
+  throw new Error("NEXT_PUBLIC_COMPANION_URL is required");
+} else {
+  companionUrl = new URL(process.env.NEXT_PUBLIC_COMPANION_URL);
+}
+
+let modelName: string;
+if (!process.env.NEXT_PUBLIC_MODEL_NAME) {
+  throw new Error("NEXT_PUBLIC_MODEL_NAME is required");
+} else {
+  modelName = process.env.NEXT_PUBLIC_MODEL_NAME;
+}
+
+let firehoseUrl: string;
+if (!process.env.NEXT_PUBLIC_FIREHOSE_URL) {
+  throw new Error("NEXT_PUBLIC_FIREHOSE_URL is required");
+} else {
+  firehoseUrl = process.env.NEXT_PUBLIC_FIREHOSE_URL;
+}
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const captureCanvasRef = useRef<HTMLCanvasElement>(null);
 
   let vrm: VRM;
   let mixer: THREE.AnimationMixer;
+  let prevAnim: THREE.AnimationAction;
   const clock = new THREE.Clock();
 
   let audio: HTMLAudioElement;
@@ -32,17 +56,20 @@ export default function Home() {
   };
 
   const init = async () => {
-    if (!canvasRef.current || !videoRef.current || !captureCanvasRef.current)
-      return;
+    if (!canvasRef.current || !captureCanvasRef.current) return;
 
     // --- WebSocket ---
     const ws = new WebSocket(firehoseUrl);
     ws.onmessage = async (evt) => {
       const json = JSON.parse(evt.data);
-      if ("name" in json && json.name === "gesture") {
+      if (
+        "name" in json &&
+        json.name === "gesture" &&
+        json.from === companionId
+      ) {
         playMotion(json.params.url);
       }
-      if ("message" in json) {
+      if ("message" in json && json.from === companionId) {
         ["happy", "sad", "angry", "neutral"].map((value) => {
           value === json.metadata.emotion
             ? vrm.expressionManager?.setValue(value, 1)
@@ -99,29 +126,6 @@ export default function Home() {
       }
     };
 
-    // --- Camera キャプチャ ---
-    setInterval(async () => {
-      if (talking) return;
-      const canvas = captureCanvasRef.current;
-      const video = videoRef.current;
-      if (!canvas || !video) return;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const base64 = canvas.toDataURL("image/png").split(",")[1];
-      if (!base64) return;
-
-      await fetch(companionUrl + "/context", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "image", context: base64 }),
-      });
-    }, 60000);
-
     // --- Three.js ---
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(
@@ -144,28 +148,36 @@ export default function Home() {
     camera.position.set(0, 1, 1);
 
     // --- モーション ---
+    const fadeToAction = (newAnim: THREE.AnimationAction, duration = 0.5) => {
+      newAnim.play();
+      if (prevAnim) prevAnim.crossFadeTo(newAnim, duration, false);
+      prevAnim = newAnim;
+    };
+
     const playIdle = async () => {
       const idleAnim = await loadMixamoAnimation("/models/Idle.fbx", vrm);
       if (!idleAnim) return;
-      const idle = mixer.clipAction(idleAnim);
-      idle.setLoop(THREE.LoopRepeat, Infinity);
-      idle.play();
+      const newAnim = mixer.clipAction(idleAnim);
+      newAnim.setLoop(THREE.LoopRepeat, Infinity);
+      fadeToAction(newAnim, 0.5);
     };
 
     const playMotion = async (path: string) => {
       const anim = await loadMixamoAnimation(path, vrm);
       if (!anim) return;
-      mixer.stopAllAction();
-      const action = mixer.clipAction(anim);
-      action.play();
-      action.setLoop(THREE.LoopRepeat, 1);
+      const newAnim = mixer.clipAction(anim);
+      newAnim.setLoop(THREE.LoopOnce, 1);
+      newAnim.clampWhenFinished = true;
+      fadeToAction(newAnim, 0.2);
       mixer.addEventListener("finished", (e) => {
-        if (e.action === action) playIdle();
+        if (e.action === newAnim) {
+          playIdle();
+        }
       });
     };
 
     const loadModel = async () => {
-      const { gltf } = await loadVRM("/models/AliciaSolid-1.0.vrm");
+      const { gltf } = await loadVRM(`/models/${modelName}`);
       vrm = gltf.userData.vrm;
       scene.add(gltf.scene);
       mixer = new THREE.AnimationMixer(gltf.scene);
@@ -196,11 +208,6 @@ export default function Home() {
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // --- ユーザーカメラ ---
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    videoRef.current.srcObject = stream;
-    await videoRef.current.play();
-
     // --- 発話認識 ---
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -209,18 +216,16 @@ export default function Home() {
     recognition.lang = "ja-JP";
     recognition.continuous = true;
     recognition.interimResults = false;
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = async (event: SpeechRecognitionEvent) => {
       const transcript = event.results[event.results.length - 1][0].transcript;
-      if (transcript.length <= 5) return;
+      if (transcript.length < 5) return;
       console.log(transcript);
       recognition.stop();
-      ws.send(
-        JSON.stringify(
-          { from: "user", message: transcript, target: companionId },
-          null,
-          2
-        )
-      );
+      await fetch(`${companionUrl.href}generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: "user", message: transcript }),
+      });
     };
 
     await loadModel();
@@ -229,7 +234,6 @@ export default function Home() {
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
-      <video ref={videoRef} style={{ display: "none" }} />
       <canvas ref={canvasRef} style={{ width: "100%", height: "100%" }} />
       <button
         onClick={init}

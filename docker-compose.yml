@@ -1,0 +1,24 @@
+services:
+  companion-1:
+    build:
+      context: ./
+    ports:
+      - "8001:8000"
+    environment:
+      - NEXT_PUBLIC_COMPANION_ID=companion_polka
+      - NEXT_PUBLIC_COMPANION_URL=http://localhost:4001
+      - NEXT_PUBLIC_FIREHOSE_URL=ws://localhost:8080
+      - NEXT_PUBLIC_MODEL_NAME=AliciaSolid-1.0.vrm
+      - AIVIS_VOICE_ID=a59cb814-0083-4369-8542-f51a29e72af7
+
+  companion-2:
+    build:
+      context: ./
+    ports:
+      - "8002:8000"
+    environment:
+      - NEXT_PUBLIC_COMPANION_ID=companion_china
+      - NEXT_PUBLIC_COMPANION_URL=http://localhost:4004
+      - NEXT_PUBLIC_FIREHOSE_URL=ws://localhost:8080
+      - NEXT_PUBLIC_MODEL_NAME=sendagaya_shino.vrm
+      - AIVIS_VOICE_ID=4f281e78-eba6-495a-8e50-5c322d02b5b1
